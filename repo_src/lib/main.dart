@@ -27,40 +27,40 @@ class GamePage extends StatefulWidget {
   State<GamePage> createState() => _GamePageState();
 }
 
-class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin {
-  // Physics
-  double _birdY = 0.0; // -1..1 (normalized world)
-  double _birdX = -0.5; // x is mostly fixed; pipes move
+class _GamePageState extends State<GamePage> {
+  double _birdY = 0.0;
+  double _birdX = -0.5;
   double _velocity = 0.0;
-  final double _gravity = -0.0045;
-  final double _flapImpulse = 0.08;
 
-  // Pipes
+  // ✨ Yumuşatılmış fizik ayarları
+  final double _gravity = -0.0028;
+  final double _flapImpulse = 0.055;
+  final double _maxRise = 0.12;
+  final double _maxFall = -0.04;
+
   final List<_Pipe> _pipes = [];
-  double _pipeSpeed = 0.008;
-  final double _gap = 0.32; // normalized height gap
   final Random _rand = Random();
+  final double _gap = 0.36;
+  double _pipeSpeed = 0.008;
   int _score = 0;
   bool _running = false;
   bool _gameOver = false;
 
   Timer? _timer;
 
-  // World width in normalized units (x -1..1), we use x in same normalized space
   void _resetGame() {
     _birdY = 0.0;
     _velocity = 0.0;
     _pipes.clear();
     _score = 0;
+    _pipeSpeed = 0.008;
     _gameOver = false;
-    // initial pipes
     for (int i = 0; i < 3; i++) {
       _pipes.add(_generatePipe(startX: 1.2 + i * 0.8));
     }
   }
 
   _Pipe _generatePipe({double startX = 1.2}) {
-    // gap center between -0.7 .. 0.7
     final center = (_rand.nextDouble() * 1.4) - 0.7;
     return _Pipe(x: startX, gapCenter: center, gap: _gap, passed: false);
   }
@@ -68,9 +68,8 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
   void _start() {
     _resetGame();
     _running = true;
-    const dt = Duration(milliseconds: 16);
     _timer?.cancel();
-    _timer = Timer.periodic(dt, (_) => _update());
+    _timer = Timer.periodic(const Duration(milliseconds: 16), (_) => _update());
     setState(() {});
   }
 
@@ -79,7 +78,6 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     _gameOver = true;
     _timer?.cancel();
     setState(() {});
-    // Show dialog
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -87,12 +85,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
         title: const Text('Oyun Bitti!'),
         content: Text('Skorun: $_score'),
         actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-            },
-            child: const Text('Kapat'),
-          ),
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Kapat')),
           TextButton(
             onPressed: () {
               Navigator.of(context).pop();
@@ -108,40 +101,37 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
   void _update() {
     if (!_running) return;
 
-    // Physics step
+    // yerçekimi ve hız sınırları
     _velocity += _gravity;
+    if (_velocity > _maxRise) _velocity = _maxRise;
+    if (_velocity < _maxFall) _velocity = _maxFall;
+
     _birdY += _velocity;
 
-    // Move pipes
     for (int i = 0; i < _pipes.length; i++) {
       _pipes[i] = _pipes[i].shift(-_pipeSpeed);
     }
 
-    // Recycle pipes + score
     if (_pipes.isNotEmpty && _pipes.first.x < -1.4) {
       _pipes.removeAt(0);
       _pipes.add(_generatePipe(startX: _pipes.last.x + 0.8));
     }
+
     for (int i = 0; i < _pipes.length; i++) {
       final p = _pipes[i];
       if (!p.passed && p.x < _birdX) {
         _pipes[i] = p.copyWith(passed: true);
         _score++;
-        // softly ramp difficulty
         _pipeSpeed = min(0.014, _pipeSpeed + 0.0004);
       }
     }
 
-    // Collision check
-    // World coordinate: y -1..1; the gap is (gapCenter-gap/2 .. gapCenter+gap/2)
     final pipeW = 0.18;
     for (final p in _pipes) {
       final xMin = p.x - pipeW / 2;
       final xMax = p.x + pipeW / 2;
-      // Bird as circle with radius
       const birdR = 0.07;
       if (_birdX + birdR > xMin && _birdX - birdR < xMax) {
-        // Inside pipe's x-span; check y vs gap
         final gmin = p.gapCenter - p.gap / 2;
         final gmax = p.gapCenter + p.gap / 2;
         if (_birdY + birdR > gmax || _birdY - birdR < gmin) {
@@ -151,7 +141,6 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
       }
     }
 
-    // Bounds (floor/ceiling)
     if (_birdY < -1.0 || _birdY > 1.0) {
       _end();
       return;
@@ -165,7 +154,9 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
       _start();
       return;
     }
-    _velocity = _flapImpulse;
+    final double damped = _velocity * 0.3;
+    _velocity = damped + _flapImpulse;
+    if (_velocity > _maxRise) _velocity = _maxRise;
   }
 
   @override
@@ -181,15 +172,14 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
       appBar: AppBar(
         title: const Text('Flappy Anime'),
         actions: [
+          IconButton(onPressed: _running ? null : _start, icon: const Icon(Icons.play_arrow)),
           IconButton(
-            onPressed: _running ? null : _start,
-            icon: const Icon(Icons.play_arrow),
-            tooltip: 'Başlat',
-          ),
-          IconButton(
-            onPressed: !_running ? null : () { _resetGame(); _running = false; setState(() {}); },
+            onPressed: !_running ? null : () {
+              _resetGame();
+              _running = false;
+              setState(() {});
+            },
             icon: const Icon(Icons.stop),
-            tooltip: 'Durdur',
           ),
         ],
       ),
@@ -201,19 +191,13 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
             onTap: _flap,
             child: Stack(
               children: [
-                // Starry background
                 Positioned.fill(child: CustomPaint(painter: _StarsPainter())),
-                // Pipes
-                Positioned.fill(
-                  child: CustomPaint(
-                    painter: _PipePainter(pipes: _pipes),
-                  ),
-                ),
-                // Bird (anime sprite)
+                Positioned.fill(child: CustomPaint(painter: _PipePainter(pipes: _pipes))),
                 _buildBird(size),
-                // HUD
                 Positioned(
-                  top: 12, left: 12, right: 12,
+                  top: 12,
+                  left: 12,
+                  right: 12,
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -251,13 +235,12 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
   }
 
   Widget _buildBird(Size size) {
-    // Convert normalized world coords to pixels: x -1..1 => 0..width, y -1..1 => 0..height (inverted y)
-    double px = ( (_birdX + 1) / 2 ) * size.width;
-    double py = ( (1 - (_birdY + 1) / 2) ) * size.height;
+    double px = ((_birdX + 1) / 2) * size.width;
+    double py = ((1 - (_birdY + 1) / 2)) * size.height;
     const birdSize = 56.0;
     return Positioned(
-      left: px - birdSize/2,
-      top: py - birdSize/2,
+      left: px - birdSize / 2,
+      top: py - birdSize / 2,
       width: birdSize,
       height: birdSize,
       child: Image.asset('assets/anime_bird.png'),
@@ -266,8 +249,8 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
 }
 
 class _Pipe {
-  final double x;        // center x (-inf..inf)
-  final double gapCenter; // y center (-1..1)
+  final double x;
+  final double gapCenter;
   final double gap;
   final bool passed;
   const _Pipe({required this.x, required this.gapCenter, required this.gap, this.passed = false});
@@ -287,15 +270,14 @@ class _PipePainter extends CustomPainter {
     final capPaint = Paint()..color = const Color(0xFF2EC4B6);
 
     for (final p in pipes) {
-      final cx = ( (p.x + 1)/2 ) * size.width;
-      final gapH = p.gap * size.height / 2; // since y normalized -1..1
-      final cy = ( (1 - (p.gapCenter + 1)/2) ) * size.height;
-      final topRect = Rect.fromLTWH(cx - pipeW/2, 0, pipeW, max(0, cy - gapH));
-      final botRect = Rect.fromLTWH(cx - pipeW/2, cy + gapH, pipeW, size.height - (cy + gapH));
+      final cx = ((p.x + 1) / 2) * size.width;
+      final gapH = p.gap * size.height / 2;
+      final cy = ((1 - (p.gapCenter + 1) / 2)) * size.height;
+      final topRect = Rect.fromLTWH(cx - pipeW / 2, 0, pipeW, max(0, cy - gapH));
+      final botRect = Rect.fromLTWH(cx - pipeW / 2, cy + gapH, pipeW, size.height - (cy + gapH));
 
       canvas.drawRect(topRect, paint);
       canvas.drawRect(Rect.fromLTWH(topRect.left, topRect.bottom - 16, pipeW, 16), capPaint);
-
       canvas.drawRect(botRect, paint);
       canvas.drawRect(Rect.fromLTWH(botRect.left, botRect.top, pipeW, 16), capPaint);
     }
@@ -316,6 +298,7 @@ class _StarsPainter extends CustomPainter {
       canvas.drawCircle(Offset(x, y), rnd.nextDouble() * 1.5, star);
     }
   }
+
   @override
   bool shouldRepaint(covariant _StarsPainter oldDelegate) => false;
 }
