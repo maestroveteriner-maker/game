@@ -1,0 +1,70 @@
+workflows:
+  android_release_apk:
+    name: Android Release APK (Flappy Anime - Self Generating)
+    max_build_duration: 60
+    environment:
+      flutter: stable
+      vars:
+        APP_DIR: "$CM_BUILD_DIR/app"
+        ORG_ID: "com.ramazan"
+        APP_NAME: "flappy_anime"
+    scripts:
+      - name: Create Flutter project and inject game files
+        script: |
+          set -e
+          echo "Flutter version:"
+          flutter --version
+
+          # 1) Create project
+          flutter create --org $ORG_ID --project-name $APP_NAME "$APP_DIR"
+          cd "$APP_DIR"
+
+          # 2) Replace pubspec.yaml to include assets, keep simple deps
+          cat > pubspec.yaml << 'YAML'
+          name: flappy_anime
+          description: Flappy Bird style mini game with anime character
+          publish_to: "none"
+          version: 1.0.0+1
+
+          environment:
+            sdk: '>=3.3.0 <4.0.0'
+
+          dependencies:
+            flutter:
+              sdk: flutter
+
+          dev_dependencies:
+            flutter_test:
+              sdk: flutter
+            flutter_lints: ^4.0.0
+
+          flutter:
+            uses-material-design: true
+            assets:
+              - assets/anime_bird.png
+          YAML
+
+          # 3) Copy our source into project
+          mkdir -p lib assets
+          rsync -av --progress "$CM_BUILD_DIR/repo_src/lib/" lib/
+          rsync -av --progress "$CM_BUILD_DIR/repo_src/assets/" assets/
+
+          # 4) Get deps and build
+          flutter pub get
+      - name: Build Android APK (release)
+        script: |
+          set -e
+          cd "$APP_DIR"
+          flutter build apk --release
+          ls -lah build/app/outputs/flutter-apk || true
+
+    artifacts:
+      - app/build/app/outputs/flutter-apk/app-release.apk
+
+    publishing:
+      email:
+        recipients:
+          - "you@example.com"
+        notify:
+          success: true
+          failure: true
